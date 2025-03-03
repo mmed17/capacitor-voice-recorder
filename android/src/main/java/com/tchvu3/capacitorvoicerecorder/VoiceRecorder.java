@@ -3,9 +3,8 @@ package com.tchvu3.capacitorvoicerecorder;
 import android.Manifest;
 import android.content.Context;
 import android.media.AudioManager;
-import android.media.MediaPlayer;
-import android.net.Uri;
-import android.util.Base64;
+import android.util.Log;
+
 import com.getcapacitor.PermissionState;
 import com.getcapacitor.Plugin;
 import com.getcapacitor.PluginCall;
@@ -13,30 +12,28 @@ import com.getcapacitor.PluginMethod;
 import com.getcapacitor.annotation.CapacitorPlugin;
 import com.getcapacitor.annotation.Permission;
 import com.getcapacitor.annotation.PermissionCallback;
-import java.io.BufferedInputStream;
 import java.io.File;
-import java.io.FileInputStream;
-import java.io.IOException;
 
 @CapacitorPlugin(
-    name = "VoiceRecorder",
-    permissions = { @Permission(alias = VoiceRecorder.RECORD_AUDIO_ALIAS, strings = { Manifest.permission.RECORD_AUDIO }) }
+        name = "VoiceRecorder",
+        permissions = {@Permission(alias = VoiceRecorder.RECORD_AUDIO_ALIAS, strings = {Manifest.permission.RECORD_AUDIO})}
 )
 public class VoiceRecorder extends Plugin {
+    private CustomAudioRecorder mediaRecorder;
 
+    static final String TAG = "VoiceRecorder";
     static final String RECORD_AUDIO_ALIAS = "voice recording";
-    private CustomMediaRecorder mediaRecorder;
 
-    @PluginMethod
+    @PluginMethod()
     public void canDeviceVoiceRecord(PluginCall call) {
-        if (CustomMediaRecorder.canPhoneCreateMediaRecorder(getContext())) {
+        if (CustomAudioRecorder.canPhoneCreateMediaRecorder(getContext())) {
             call.resolve(ResponseGenerator.successResponse());
         } else {
             call.resolve(ResponseGenerator.failResponse());
         }
     }
 
-    @PluginMethod
+    @PluginMethod()
     public void requestAudioRecordingPermission(PluginCall call) {
         if (doesUserGaveAudioRecordingPermission()) {
             call.resolve(ResponseGenerator.successResponse());
@@ -50,14 +47,14 @@ public class VoiceRecorder extends Plugin {
         this.hasAudioRecordingPermission(call);
     }
 
-    @PluginMethod
+    @PluginMethod()
     public void hasAudioRecordingPermission(PluginCall call) {
         call.resolve(ResponseGenerator.fromBoolean(doesUserGaveAudioRecordingPermission()));
     }
 
-    @PluginMethod
+    @PluginMethod()
     public void startRecording(PluginCall call) {
-        if (!CustomMediaRecorder.canPhoneCreateMediaRecorder(getContext())) {
+        if (!CustomAudioRecorder.canPhoneCreateMediaRecorder(getContext())) {
             call.reject(Messages.CANNOT_RECORD_ON_THIS_PHONE);
             return;
         }
@@ -77,20 +74,19 @@ public class VoiceRecorder extends Plugin {
             return;
         }
 
+        String outputDir = call.getString("directory");
+        String outputPath = call.getString("path");
+
         try {
-            String directory = call.getString("directory");
-            String subDirectory = call.getString("subDirectory");
-            RecordOptions options = new RecordOptions(directory, subDirectory);
-            mediaRecorder = new CustomMediaRecorder(getContext(), options);
+            mediaRecorder = new CustomAudioRecorder(getContext(), outputPath);
             mediaRecorder.startRecording();
             call.resolve(ResponseGenerator.successResponse());
         } catch (Exception exp) {
-            mediaRecorder = null;
             call.reject(Messages.FAILED_TO_RECORD, exp);
         }
     }
 
-    @PluginMethod
+    @PluginMethod()
     public void stopRecording(PluginCall call) {
         if (mediaRecorder == null) {
             call.reject(Messages.RECORDING_HAS_NOT_STARTED);
@@ -100,66 +96,19 @@ public class VoiceRecorder extends Plugin {
         try {
             mediaRecorder.stopRecording();
             File recordedFile = mediaRecorder.getOutputFile();
-            RecordOptions options = mediaRecorder.getRecordOptions();
+            String outputPath = recordedFile.getAbsolutePath();
 
-            String recordDataBase64 = null;
-            String uri = null;
-            if (options.getDirectory() != null) {
-                uri = Uri.fromFile(recordedFile).toString();
-            } else {
-                recordDataBase64 = readRecordedFileAsBase64(recordedFile);
-            }
+            RecordData recordData = new RecordData(outputPath);
+            call.resolve(ResponseGenerator.dataResponse(recordData.toJSObject()));
 
-            RecordData recordData = new RecordData(
-                recordDataBase64,
-                getMsDurationOfAudioFile(recordedFile.getAbsolutePath()),
-                "audio/aac",
-                uri
-            );
-            if ((recordDataBase64 == null && uri == null) || recordData.getMsDuration() < 0) {
-                call.reject(Messages.EMPTY_RECORDING);
-            } else {
-                call.resolve(ResponseGenerator.dataResponse(recordData.toJSObject()));
-            }
         } catch (Exception exp) {
             call.reject(Messages.FAILED_TO_FETCH_RECORDING, exp);
         } finally {
-            RecordOptions options = mediaRecorder.getRecordOptions();
-            if (options.getDirectory() == null) {
-                mediaRecorder.deleteOutputFile();
-            }
-
             mediaRecorder = null;
         }
     }
 
-    @PluginMethod
-    public void pauseRecording(PluginCall call) {
-        if (mediaRecorder == null) {
-            call.reject(Messages.RECORDING_HAS_NOT_STARTED);
-            return;
-        }
-        try {
-            call.resolve(ResponseGenerator.fromBoolean(mediaRecorder.pauseRecording()));
-        } catch (NotSupportedOsVersion exception) {
-            call.reject(Messages.NOT_SUPPORTED_OS_VERSION);
-        }
-    }
-
-    @PluginMethod
-    public void resumeRecording(PluginCall call) {
-        if (mediaRecorder == null) {
-            call.reject(Messages.RECORDING_HAS_NOT_STARTED);
-            return;
-        }
-        try {
-            call.resolve(ResponseGenerator.fromBoolean(mediaRecorder.resumeRecording()));
-        } catch (NotSupportedOsVersion exception) {
-            call.reject(Messages.NOT_SUPPORTED_OS_VERSION);
-        }
-    }
-
-    @PluginMethod
+    @PluginMethod()
     public void getCurrentStatus(PluginCall call) {
         if (mediaRecorder == null) {
             call.resolve(ResponseGenerator.statusResponse(CurrentRecordingStatus.NONE));
@@ -172,33 +121,11 @@ public class VoiceRecorder extends Plugin {
         return getPermissionState(VoiceRecorder.RECORD_AUDIO_ALIAS).equals(PermissionState.GRANTED);
     }
 
-    private String readRecordedFileAsBase64(File recordedFile) {
-        BufferedInputStream bufferedInputStream;
-        byte[] bArray = new byte[(int) recordedFile.length()];
-        try {
-            bufferedInputStream = new BufferedInputStream(new FileInputStream(recordedFile));
-            bufferedInputStream.read(bArray);
-            bufferedInputStream.close();
-        } catch (IOException exp) {
-            return null;
-        }
-        return Base64.encodeToString(bArray, Base64.DEFAULT);
-    }
-
-    private int getMsDurationOfAudioFile(String recordedFilePath) {
-        try {
-            MediaPlayer mediaPlayer = new MediaPlayer();
-            mediaPlayer.setDataSource(recordedFilePath);
-            mediaPlayer.prepare();
-            return mediaPlayer.getDuration();
-        } catch (Exception ignore) {
-            return -1;
-        }
-    }
-
     private boolean isMicrophoneOccupied() {
         AudioManager audioManager = (AudioManager) this.getContext().getSystemService(Context.AUDIO_SERVICE);
-        if (audioManager == null) return true;
+        if (audioManager == null)
+            return true;
         return audioManager.getMode() != AudioManager.MODE_NORMAL;
     }
+
 }

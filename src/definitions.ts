@@ -11,12 +11,11 @@ export interface RecordingData {
   };
 }
 
-export type RecordingOptions =
-  | never
-  | {
-      directory: Directory;
-      subDirectory?: string;
-    };
+export type RecordingOptions =  never | {
+    directory: Directory;
+    subDirectory?: string;
+    path?: string;
+  };
 
 export interface GenericResponse {
   value: boolean;
