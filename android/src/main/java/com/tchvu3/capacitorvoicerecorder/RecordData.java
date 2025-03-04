@@ -5,11 +5,16 @@ import com.getcapacitor.JSObject;
 public class RecordData {
 
     private String outputPath;
+    private long duration;
 
     public RecordData() {}
 
-    public RecordData(String outputPath) {
+    public RecordData(String outputPath, long duration) {
+        if(outputPath.startsWith("/")) {
+          outputPath = outputPath.substring(1);
+        }
         this.outputPath = outputPath;
+        this.duration = duration;
     }
 
     public String getOutputPath() {
@@ -23,7 +28,8 @@ public class RecordData {
 
     public JSObject toJSObject() {
         JSObject toReturn = new JSObject();
-        toReturn.put("outputPath", outputPath);
+        toReturn.put("uri", "file://" + outputPath);
+        toReturn.put("msDuration", this.duration);
         return toReturn;
     }
 }

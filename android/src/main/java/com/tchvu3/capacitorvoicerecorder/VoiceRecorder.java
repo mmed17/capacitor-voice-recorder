@@ -3,6 +3,7 @@ package com.tchvu3.capacitorvoicerecorder;
 import android.Manifest;
 import android.content.Context;
 import android.media.AudioManager;
+import android.media.MediaMetadataRetriever;
 import android.util.Log;
 
 import com.getcapacitor.PermissionState;
@@ -74,7 +75,6 @@ public class VoiceRecorder extends Plugin {
             return;
         }
 
-        String outputDir = call.getString("directory");
         String outputPath = call.getString("path");
 
         try {
@@ -98,7 +98,9 @@ public class VoiceRecorder extends Plugin {
             File recordedFile = mediaRecorder.getOutputFile();
             String outputPath = recordedFile.getAbsolutePath();
 
-            RecordData recordData = new RecordData(outputPath);
+            long duration = getAudioDuration(recordedFile);
+            RecordData recordData = new RecordData(outputPath, duration);
+
             call.resolve(ResponseGenerator.dataResponse(recordData.toJSObject()));
 
         } catch (Exception exp) {
@@ -128,4 +130,28 @@ public class VoiceRecorder extends Plugin {
         return audioManager.getMode() != AudioManager.MODE_NORMAL;
     }
 
+  private long getAudioDuration(File file) {
+    if (file.exists() && file.canRead()) {
+      MediaMetadataRetriever retriever = new MediaMetadataRetriever();
+      try {
+        retriever.setDataSource(file.getAbsolutePath());
+        String durationStr = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION);
+        retriever.release();
+
+        if (durationStr != null) {
+          return Long.parseLong(durationStr); // Duration in milliseconds
+        } else {
+          Log.e(TAG, "Duration metadata is not available.");
+          return 0;
+        }
+      } catch (Exception e) {
+        e.printStackTrace();
+        Log.e(TAG, "Error retrieving duration: " + e.getMessage());
+        return 0;
+      }
+    } else {
+      Log.e(TAG, "File does not exist or is not readable.");
+      return 0;
+    }
+  }
 }
